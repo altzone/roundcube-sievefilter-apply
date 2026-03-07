@@ -63,7 +63,7 @@ cp plugins/sievefilter_apply/config.inc.php.dist plugins/sievefilter_apply/confi
 ### Composer
 
 ```bash
-composer require roundcube/sievefilter-apply
+composer require altzone/sievefilter-apply
 ```
 
 Then enable the plugin in your Roundcube configuration as shown above.

@@ -1,5 +1,5 @@
 {
-    "name": "roundcube/sievefilter-apply",
+    "name": "altzone/sievefilter-apply",
     "type": "roundcube-plugin",
     "description": "Retroactively apply Sieve filter rules to existing messages in a folder",
     "license": "GPL-3.0-or-later",
@@ -10,7 +10,7 @@
         "filter",
         "managesieve"
     ],
-    "homepage": "https://github.com/roundcube/sievefilter-apply",
+    "homepage": "https://github.com/altzone/roundcube-sievefilter-apply",
     "require": {
         "php": ">=7.4",
         "roundcube/plugin-installer": ">=0.1.3"
