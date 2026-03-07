@@ -12,7 +12,7 @@
  */
 class sievefilter_apply extends rcube_plugin
 {
-    public $task = 'mail';
+    public $task = 'mail|settings';
 
     private $rc;
     private $sieve;
@@ -34,14 +34,21 @@ class sievefilter_apply extends rcube_plugin
         }
 
         $this->load_config();
-        $this->add_texts('localization/');
+        $this->add_texts('localization/', true);
 
-        // Include JavaScript and CSS
-        if ($this->rc->output && $this->rc->output->type === 'html') {
+        // Determine context
+        $is_mail = ($this->rc->task === 'mail');
+        $is_sieve = ($this->rc->task === 'settings'
+            && strpos($this->rc->action, 'plugin.managesieve') === 0);
+
+        // Include JavaScript and CSS in mail or managesieve contexts
+        if ($is_mail || $is_sieve) {
             $this->include_script('sievefilter_apply.js');
             $this->include_stylesheet($this->local_skin_path() . '/sievefilter_apply.css');
+        }
 
-            // Add toolbar button
+        // Add toolbar button in mail task
+        if ($is_mail && $this->rc->output && $this->rc->output->type === 'html') {
             $this->add_button([
                 'command'    => 'plugin.sievefilter-apply',
                 'type'       => 'link',
@@ -53,9 +60,120 @@ class sievefilter_apply extends rcube_plugin
             ], 'toolbar');
         }
 
+        // Inject folder list for the managesieve page
+        if ($is_sieve && $this->rc->output) {
+            $storage = $this->rc->get_storage();
+            $folders = $storage->list_folders_subscribed('', '*', null, null, true);
+            $this->rc->output->set_env('sievefilter_apply_folders', $folders);
+        }
+
         // Register actions
+        $this->register_action('plugin.sievefilter-apply-list-rules', [$this, 'action_list_rules']);
         $this->register_action('plugin.sievefilter-apply-preview', [$this, 'action_preview']);
         $this->register_action('plugin.sievefilter-apply-execute', [$this, 'action_execute']);
+    }
+
+    /**
+     * List available Sieve rules for user selection.
+     */
+    public function action_list_rules()
+    {
+        try {
+            $rules = $this->_get_sieve_rules();
+            $rule_list = [];
+
+            foreach ($rules as $idx => $rule) {
+                $disabled = !empty($rule['disabled']);
+                $name = isset($rule['name']) ? $rule['name'] : $this->gettext('rule') . ' ' . ($idx + 1);
+
+                // Build a human-readable description of the rule
+                $desc = '';
+                if (!empty($rule['tests'])) {
+                    $parts = [];
+                    foreach ($rule['tests'] as $test) {
+                        $parts[] = $this->_describe_test($test);
+                    }
+                    $join = !empty($rule['join']) ? ' AND ' : ' OR ';
+                    $desc = implode($join, $parts);
+                }
+
+                // Describe actions
+                $action_desc = '';
+                if (!empty($rule['actions'])) {
+                    $action_parts = [];
+                    foreach ($rule['actions'] as $action) {
+                        if ($action['type'] === 'fileinto') {
+                            $action_parts[] = '→ ' . $action['target'];
+                        } elseif ($action['type'] === 'discard') {
+                            $action_parts[] = '→ ' . $this->gettext('action_discard');
+                        } elseif ($action['type'] === 'addflag' || $action['type'] === 'setflag') {
+                            $action_parts[] = '→ ' . $this->gettext('action_flag') . ' ' . $action['target'];
+                        } elseif ($action['type'] === 'redirect') {
+                            $action_parts[] = '→ redirect (ignoré)';
+                        } elseif ($action['type'] === 'keep') {
+                            $action_parts[] = '→ ' . $this->gettext('action_keep');
+                        } elseif ($action['type'] !== 'stop') {
+                            $action_parts[] = '→ ' . $action['type'];
+                        }
+                    }
+                    $action_desc = implode(', ', $action_parts);
+                }
+
+                $rule_list[] = [
+                    'index'    => $idx,
+                    'name'     => $name,
+                    'desc'     => $desc,
+                    'actions'  => $action_desc,
+                    'disabled' => $disabled,
+                ];
+            }
+
+            $this->rc->output->command('plugin.sievefilter_apply_rules_list', [
+                'rules' => $rule_list,
+            ]);
+
+        } catch (Exception $e) {
+            rcube::raise_error($e, true, false);
+            $this->rc->output->command('plugin.sievefilter_apply_error',
+                ['message' => $this->gettext('error_sieve_connect') . ': ' . $e->getMessage()]);
+        }
+
+        $this->rc->output->send();
+    }
+
+    /**
+     * Describe a test condition in human-readable form.
+     */
+    private function _describe_test(array $test)
+    {
+        if (!isset($test['test'])) {
+            return '?';
+        }
+
+        switch ($test['test']) {
+            case 'header':
+            case 'address':
+                $headers = isset($test['arg1']) ? (array) $test['arg1'] : [];
+                $values  = isset($test['arg2']) ? (array) $test['arg2'] : [];
+                $type    = isset($test['type']) ? $test['type'] : 'is';
+                $not     = !empty($test['not']) ? 'NOT ' : '';
+                return $not . implode(',', $headers) . ' ' . $type . ' "' . implode('","', $values) . '"';
+
+            case 'size':
+                $comparator = isset($test['type']) ? $test['type'] : 'over';
+                $arg = isset($test['arg']) ? $test['arg'] : '0';
+                return 'size ' . $comparator . ' ' . $arg;
+
+            case 'exists':
+                $args = isset($test['arg']) ? (array) $test['arg'] : [];
+                return 'exists ' . implode(',', $args);
+
+            case 'true':
+                return 'true';
+
+            default:
+                return $test['test'];
+        }
     }
 
     /**
@@ -72,15 +190,33 @@ class sievefilter_apply extends rcube_plugin
             return;
         }
 
+        // Get selected rule indices (optional filter)
+        $selected_rules = rcube_utils::get_input_value('_rules', rcube_utils::INPUT_POST);
+        if (is_string($selected_rules)) {
+            $selected_rules = json_decode($selected_rules, true);
+        }
+
         try {
             // Get Sieve rules
-            $rules = $this->_get_sieve_rules();
+            $all_rules = $this->_get_sieve_rules();
 
-            if (empty($rules)) {
+            if (empty($all_rules)) {
                 $this->rc->output->command('plugin.sievefilter_apply_error',
                     ['message' => $this->gettext('error_no_rules')]);
                 $this->rc->output->send();
                 return;
+            }
+
+            // Filter to selected rules if specified
+            if (is_array($selected_rules) && !empty($selected_rules)) {
+                $rules = [];
+                foreach ($selected_rules as $idx) {
+                    if (isset($all_rules[(int) $idx])) {
+                        $rules[] = $all_rules[(int) $idx];
+                    }
+                }
+            } else {
+                $rules = $all_rules;
             }
 
             // Get messages from the folder
@@ -200,8 +336,12 @@ class sievefilter_apply extends rcube_plugin
         $storage = $this->rc->get_storage();
         $storage->set_folder($mbox);
 
-        $success = 0;
-        $errors  = 0;
+        $success  = 0;
+        $errors   = 0;
+        $moved    = 0;
+        $flagged  = 0;
+        $deleted  = 0;
+        $details  = []; // per-target breakdown
 
         // Group actions by type and target for batch processing
         $grouped = [];
@@ -254,7 +394,10 @@ class sievefilter_apply extends rcube_plugin
                         }
                     }
                     if ($storage->move_message($uids, $target, $mbox)) {
-                        $success += count($uids);
+                        $cnt = count($uids);
+                        $success += $cnt;
+                        $moved += $cnt;
+                        $details[$target] = ($details[$target] ?? 0) + $cnt;
                     } else {
                         $errors += count($uids);
                     }
@@ -262,7 +405,9 @@ class sievefilter_apply extends rcube_plugin
 
                 case 'discard':
                     if ($storage->delete_message($uids, $mbox)) {
-                        $success += count($uids);
+                        $cnt = count($uids);
+                        $success += $cnt;
+                        $deleted += $cnt;
                     } else {
                         $errors += count($uids);
                     }
@@ -272,7 +417,9 @@ class sievefilter_apply extends rcube_plugin
                 case 'setflag':
                     $flag = $this->_sieve_flag_to_imap($target);
                     if ($flag && $storage->set_flag($uids, $flag, $mbox)) {
-                        $success += count($uids);
+                        $cnt = count($uids);
+                        $success += $cnt;
+                        $flagged += $cnt;
                     } else {
                         $errors += count($uids);
                     }
@@ -282,6 +429,7 @@ class sievefilter_apply extends rcube_plugin
                     $flag = $this->_sieve_flag_to_imap($target);
                     if ($flag && $storage->unset_flag($uids, $flag, $mbox)) {
                         $success += count($uids);
+                        $flagged += count($uids);
                     } else {
                         $errors += count($uids);
                     }
@@ -310,6 +458,10 @@ class sievefilter_apply extends rcube_plugin
         $result = [
             'success' => $success,
             'errors'  => $errors,
+            'moved'   => $moved,
+            'flagged' => $flagged,
+            'deleted' => $deleted,
+            'details' => $details,
             'mbox'    => $mbox,
         ];
 
@@ -373,18 +525,32 @@ class sievefilter_apply extends rcube_plugin
         }
 
         $host = $this->rc->config->get('managesieve_host', 'localhost');
-        $port = $this->rc->config->get('managesieve_port', 4190);
-        $usetls = $this->rc->config->get('managesieve_usetls', true);
-        $auth_type = $this->rc->config->get('managesieve_auth_type');
+        $host = rcube_utils::parse_host($host);
 
         // Get IMAP credentials from session
         $user = $_SESSION['username'];
         $pass = $this->rc->decrypt($_SESSION['password']);
 
-        // Resolve host if it's a variable
-        if ($host === '%h') {
-            $host = $_SESSION['storage_host'] ?? $this->rc->config->get('default_host', 'localhost');
+        $auth_type = $this->rc->config->get('managesieve_auth_type');
+        $options   = $this->rc->config->get('managesieve_conn_options');
+
+        // Parse URI to extract scheme, host, port (same as managesieve engine)
+        list($host, $scheme, $port) = rcube_utils::parse_host_uri($host);
+
+        // tls:// = explicit STARTTLS, ssl:// = implicit SSL
+        $tls = ($scheme === 'tls');
+        if ($scheme === 'ssl') {
+            $host = 'ssl://' . $host;
         }
+
+        if (empty($port)) {
+            $port = getservbyname('sieve', 'tcp') ?: 4190;
+        }
+
+        $host = rcube_utils::idn_to_ascii($host);
+
+        // Handle per-host socket options
+        rcube_utils::parse_socket_options($options, $host);
 
         $this->sieve = new rcube_sieve(
             $user,
@@ -392,11 +558,12 @@ class sievefilter_apply extends rcube_plugin
             $host,
             $port,
             $auth_type,
-            $usetls,
-            [],                    // disabled extensions
+            $tls,
+            $this->rc->config->get('managesieve_disabled_extensions', []),
             $this->rc->config->get('managesieve_debug', false),
             $this->rc->config->get('managesieve_auth_cid'),
-            $this->rc->config->get('managesieve_auth_pw')
+            $this->rc->config->get('managesieve_auth_pw'),
+            $options
         );
 
         if ($this->sieve->error()) {
@@ -426,18 +593,18 @@ class sievefilter_apply extends rcube_plugin
                 continue;
             }
 
-            // Build headers array for evaluation
+            // Build headers array for evaluation (decode MIME-encoded values)
             $hdrs = [];
-            if (!empty($headers->from))    $hdrs['from']       = $headers->from;
-            if (!empty($headers->to))      $hdrs['to']         = $headers->to;
-            if (!empty($headers->cc))      $hdrs['cc']         = $headers->cc;
-            if (!empty($headers->bcc))     $hdrs['bcc']        = $headers->bcc;
-            if (!empty($headers->subject)) $hdrs['subject']    = $headers->subject;
-            if (!empty($headers->replyto)) $hdrs['reply-to']   = $headers->replyto;
+            if (!empty($headers->from))    $hdrs['from']       = rcube_mime::decode_header($headers->from);
+            if (!empty($headers->to))      $hdrs['to']         = rcube_mime::decode_header($headers->to);
+            if (!empty($headers->cc))      $hdrs['cc']         = rcube_mime::decode_header($headers->cc);
+            if (!empty($headers->bcc))     $hdrs['bcc']        = rcube_mime::decode_header($headers->bcc);
+            if (!empty($headers->subject)) $hdrs['subject']    = rcube_mime::decode_header($headers->subject);
+            if (!empty($headers->replyto)) $hdrs['reply-to']   = rcube_mime::decode_header($headers->replyto);
             if (!empty($headers->date))    $hdrs['date']       = $headers->date;
             if (!empty($headers->others)) {
                 foreach ($headers->others as $key => $val) {
-                    $hdrs[strtolower($key)] = $val;
+                    $hdrs[strtolower($key)] = is_string($val) ? rcube_mime::decode_header($val) : $val;
                 }
             }
             // List-Id header (commonly used in mailing list filters)
@@ -445,11 +612,14 @@ class sievefilter_apply extends rcube_plugin
                 $hdrs['list-id'] = $headers->list_id;
             }
 
+            $decoded_subject = !empty($headers->subject) ? rcube_mime::decode_header($headers->subject) : '';
+            $decoded_from    = !empty($headers->from) ? rcube_mime::decode_header($headers->from) : '';
+
             $result[$uid] = [
                 'headers' => $hdrs,
                 'size'    => isset($headers->size) ? (int) $headers->size : 0,
-                'subject' => isset($headers->subject) ? mb_substr($headers->subject, 0, 80) : '',
-                'from'    => isset($headers->from) ? $headers->from : '',
+                'subject' => mb_substr($decoded_subject, 0, 80),
+                'from'    => $decoded_from,
             ];
         }
 

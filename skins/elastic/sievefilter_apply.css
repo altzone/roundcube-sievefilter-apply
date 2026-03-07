@@ -3,13 +3,89 @@
 /* Toolbar button */
 .toolbar a.button.sievefilter-apply::before {
     content: "\f0b0"; /* FontAwesome filter icon */
-    font-family: "Font Awesome 5 Free", "FontAwesome";
+    font-family: Icons !important;
     font-weight: 900;
 }
 
 .toolbar a.button.sievefilter-apply:hover::before,
 .toolbar a.button.sievefilter-apply.selected::before {
     color: #007bff;
+}
+
+/* Rule selection dialog */
+.sievefilter-apply-rules p {
+    margin: 0 0 0.8em 0;
+    color: #555;
+}
+
+.sievefilter-apply-selectall {
+    margin-bottom: 0.6em;
+    font-size: 0.85em;
+}
+
+.sievefilter-apply-selectall a {
+    color: #007bff;
+    text-decoration: none;
+}
+
+.sievefilter-apply-selectall a:hover {
+    text-decoration: underline;
+}
+
+.sievefilter-apply-rulelist {
+    max-height: 350px;
+    overflow-y: auto;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+}
+
+label.sieve-rule-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    padding: 0.5em 0.7em;
+    border-bottom: 1px solid #f0f0f0;
+    cursor: pointer;
+    margin: 0;
+    font-weight: normal;
+}
+
+label.sieve-rule-item:last-child {
+    border-bottom: none;
+}
+
+label.sieve-rule-item:hover {
+    background-color: #f5f8ff;
+}
+
+label.sieve-rule-item.rule-disabled {
+    opacity: 0.5;
+}
+
+label.sieve-rule-item input[type="checkbox"] {
+    flex-shrink: 0;
+}
+
+.rule-name {
+    font-weight: 500;
+    flex-shrink: 0;
+}
+
+.rule-action {
+    color: #888;
+    font-size: 0.85em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.rule-badge-disabled {
+    font-size: 0.75em;
+    background: #dc3545;
+    color: #fff;
+    padding: 0.1em 0.4em;
+    border-radius: 3px;
+    flex-shrink: 0;
 }
 
 /* Preview dialog */
@@ -26,7 +102,7 @@
 .sievefilter-apply-preview .action-summary {
     list-style: none;
     padding: 0;
-    margin: 0;
+    margin: 0 0 1em 0;
 }
 
 .sievefilter-apply-preview .action-summary li {
@@ -55,7 +131,168 @@
     color: #999;
 }
 
+/* Detail table */
+.action-details {
+    margin-top: 0.5em;
+}
+
+.action-details summary {
+    cursor: pointer;
+    color: #007bff;
+    font-size: 0.9em;
+    margin-bottom: 0.5em;
+}
+
+.action-detail-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85em;
+}
+
+.action-detail-table th {
+    background: #f5f5f5;
+    padding: 0.4em 0.5em;
+    text-align: left;
+    border-bottom: 2px solid #dee2e6;
+    font-weight: 600;
+}
+
+.action-detail-table td {
+    padding: 0.3em 0.5em;
+    border-bottom: 1px solid #f0f0f0;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ManageSieve toolbar: "Apply to folder" button (same style as create/delete) */
+#responsestoolbar a.button.sievefilter-apply::before {
+    content: "\f0b0";
+    font-family: Icons !important;
+    font-weight: 900;
+}
+
+/* Folder picker */
+.sievefilter-apply-folderpicker p {
+    margin: 0 0 0.6em 0;
+}
+
+.sievefilter-folder-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+}
+
+.sievefilter-folder-list .folder-item {
+    padding: 0.45em 0.6em;
+    cursor: pointer;
+    border-bottom: 1px solid #f0f0f0;
+    font-size: 0.93em;
+    user-select: none;
+}
+
+.sievefilter-folder-list .folder-item:last-child {
+    border-bottom: none;
+}
+
+.sievefilter-folder-list .folder-item:hover {
+    background: #f0f5ff;
+}
+
+.sievefilter-folder-list .folder-item.active {
+    background: #007bff;
+    color: #fff;
+}
+
+.sievefilter-folder-list .folder-item.active:hover {
+    background: #0069d9;
+}
+
+html.dark-mode .sievefilter-folder-list {
+    border-color: #444;
+}
+
+html.dark-mode .sievefilter-folder-list .folder-item {
+    border-bottom-color: #333;
+}
+
+html.dark-mode .sievefilter-folder-list .folder-item:hover {
+    background: #2a2a3a;
+}
+
+html.dark-mode .sievefilter-folder-list .folder-item.active {
+    background: #0d6efd;
+}
+
+/* Result dialog */
+.sievefilter-apply-result .result-status {
+    font-size: 1.05em;
+    font-weight: 500;
+    margin-bottom: 0.8em;
+}
+
+.sievefilter-apply-result .result-ok {
+    color: #28a745;
+}
+
+.sievefilter-apply-result .result-warning {
+    color: #dc3545;
+}
+
+.sievefilter-apply-result .result-breakdown {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 0.8em 0;
+}
+
+.sievefilter-apply-result .result-breakdown li {
+    padding: 0.2em 0;
+    font-size: 0.95em;
+}
+
+.sievefilter-apply-result .result-details {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    border-top: 1px solid #eee;
+    padding-top: 0.5em;
+}
+
+.sievefilter-apply-result .result-details li {
+    padding: 0.3em 0;
+    font-size: 0.9em;
+}
+
+.sievefilter-apply-result .result-details li strong {
+    color: #007bff;
+    min-width: 2em;
+    display: inline-block;
+    text-align: right;
+    margin-right: 0.3em;
+}
+
 /* Dark mode support */
+html.dark-mode .sievefilter-apply-rules p {
+    color: #aaa;
+}
+
+html.dark-mode .sievefilter-apply-rulelist {
+    border-color: #444;
+}
+
+html.dark-mode label.sieve-rule-item {
+    border-bottom-color: #333;
+}
+
+html.dark-mode label.sieve-rule-item:hover {
+    background-color: #2a2a3a;
+}
+
 html.dark-mode .sievefilter-apply-preview .summary-header {
     color: #ccc;
 }
@@ -66,4 +303,13 @@ html.dark-mode .sievefilter-apply-preview .action-summary li {
 
 html.dark-mode .sievefilter-apply-preview .action-summary li strong {
     color: #5ba3f5;
+}
+
+html.dark-mode .action-detail-table th {
+    background: #333;
+    border-bottom-color: #555;
+}
+
+html.dark-mode .action-detail-table td {
+    border-bottom-color: #444;
 }
