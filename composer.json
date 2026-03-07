@@ -1,0 +1,23 @@
+{
+    "name": "roundcube/sievefilter-apply",
+    "type": "roundcube-plugin",
+    "description": "Retroactively apply Sieve filter rules to existing messages in a folder",
+    "license": "GPL-3.0-or-later",
+    "keywords": [
+        "roundcube",
+        "plugin",
+        "sieve",
+        "filter",
+        "managesieve"
+    ],
+    "homepage": "https://github.com/roundcube/sievefilter-apply",
+    "require": {
+        "php": ">=7.4",
+        "roundcube/plugin-installer": ">=0.1.3"
+    },
+    "extra": {
+        "roundcube": {
+            "min-version": "1.6.0"
+        }
+    }
+}

@@ -1,0 +1,69 @@
+/* Sieve Filter Apply - Elastic theme styles */
+
+/* Toolbar button */
+.toolbar a.button.sievefilter-apply::before {
+    content: "\f0b0"; /* FontAwesome filter icon */
+    font-family: "Font Awesome 5 Free", "FontAwesome";
+    font-weight: 900;
+}
+
+.toolbar a.button.sievefilter-apply:hover::before,
+.toolbar a.button.sievefilter-apply.selected::before {
+    color: #007bff;
+}
+
+/* Preview dialog */
+.sievefilter-apply-preview {
+    padding: 0.5em 0;
+}
+
+.sievefilter-apply-preview .summary-header {
+    margin-bottom: 1em;
+    font-size: 1em;
+    color: #333;
+}
+
+.sievefilter-apply-preview .action-summary {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.sievefilter-apply-preview .action-summary li {
+    padding: 0.4em 0.6em;
+    border-bottom: 1px solid #eee;
+    font-size: 0.95em;
+}
+
+.sievefilter-apply-preview .action-summary li:last-child {
+    border-bottom: none;
+}
+
+.sievefilter-apply-preview .action-summary li strong {
+    display: inline-block;
+    min-width: 2em;
+    text-align: right;
+    margin-right: 0.3em;
+    color: #007bff;
+}
+
+.sievefilter-apply-preview .action-summary li.no-action strong {
+    color: #999;
+}
+
+.sievefilter-apply-preview .action-summary li.no-action {
+    color: #999;
+}
+
+/* Dark mode support */
+html.dark-mode .sievefilter-apply-preview .summary-header {
+    color: #ccc;
+}
+
+html.dark-mode .sievefilter-apply-preview .action-summary li {
+    border-bottom-color: #444;
+}
+
+html.dark-mode .sievefilter-apply-preview .action-summary li strong {
+    color: #5ba3f5;
+}

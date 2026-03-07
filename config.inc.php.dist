@@ -1,0 +1,19 @@
+<?php
+
+// Maximum number of messages to process per operation
+$config['sievefilter_apply_max_messages'] = 500;
+
+// IMAP fetch batch size (headers fetched per round)
+$config['sievefilter_apply_batch_size'] = 50;
+
+// Skip redirect actions in retroactive mode (recommended: true)
+// Prevents email storms when applying filters to existing messages
+$config['sievefilter_apply_skip_redirect'] = true;
+
+// Skip reject actions in retroactive mode (recommended: true)
+// Messages are already received, reject/bounce makes no sense retroactively
+$config['sievefilter_apply_skip_reject'] = true;
+
+// Restrict to specific hosts (null = all hosts allowed)
+// Example: ['mail.example.com', 'imap.example.com']
+$config['sievefilter_apply_allowed_hosts'] = null;
