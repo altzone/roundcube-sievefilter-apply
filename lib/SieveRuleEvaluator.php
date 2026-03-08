@@ -6,6 +6,11 @@
  * Evaluates Sieve filter rules against message headers.
  * Works with the parsed rule format from rcube_sieve_script::as_array().
  *
+ * Implements RFC 5228 semantics:
+ * - All matching rules fire (actions accumulate) unless an explicit 'stop' is encountered
+ * - Multi-value headers are tested individually (not concatenated)
+ * - 'matches' wildcards use Sieve semantics (* = any string, ? = any char)
+ *
  * @author Claude Code
  * @license GPLv3
  */
@@ -26,7 +31,9 @@ class SieveRuleEvaluator
 
     /**
      * Evaluate all rules against a message's headers.
-     * Returns the list of actions to apply, or empty array if no match.
+     *
+     * Per RFC 5228 §2.10: all matching rules execute their actions unless
+     * an explicit 'stop' command halts evaluation. Actions accumulate across rules.
      *
      * @param array $rules   Rules from rcube_sieve_script::as_array()
      * @param array $headers Associative array of message headers (lowercase keys)
@@ -42,13 +49,15 @@ class SieveRuleEvaluator
         }
         $headers = $normalized;
 
+        $collected_actions = [];
+
         foreach ($rules as $rule) {
             // Skip disabled rules
             if (!empty($rule['disabled'])) {
                 continue;
             }
 
-            // Evaluate the tests
+            // Rules without tests are skipped (unconditional rules should use 'true' test)
             if (!isset($rule['tests']) || !is_array($rule['tests'])) {
                 continue;
             }
@@ -57,23 +66,37 @@ class SieveRuleEvaluator
 
             if ($match) {
                 $actions = $this->_extract_actions($rule);
-                if (!empty($actions)) {
-                    return $actions;
-                }
-                // If all actions were filtered out (redirect/reject), continue to next rule
-            }
+                $collected_actions = array_merge($collected_actions, $actions);
 
-            // Check for stop
-            if ($match && !empty($rule['actions'])) {
-                foreach ($rule['actions'] as $action) {
-                    if (isset($action['type']) && $action['type'] === 'stop') {
-                        return [];
-                    }
+                // Check for explicit stop action - halts rule evaluation (RFC 5228 §2.10.1)
+                if ($this->_has_stop($rule)) {
+                    return $collected_actions;
                 }
             }
         }
 
-        return [];
+        return $collected_actions;
+    }
+
+    /**
+     * Check if a rule contains a stop action.
+     *
+     * @param array $rule Rule definition
+     * @return bool
+     */
+    private function _has_stop(array $rule)
+    {
+        if (empty($rule['actions']) || !is_array($rule['actions'])) {
+            return false;
+        }
+
+        foreach ($rule['actions'] as $action) {
+            if (isset($action['type']) && $action['type'] === 'stop') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -141,8 +164,9 @@ class SieveRuleEvaluator
                 break;
 
             case 'envelope':
-                // Envelope tests can't be evaluated retroactively (no envelope data)
-                // Fall back to address test on From/To headers
+                // Envelope tests can't be evaluated retroactively (no envelope data).
+                // Fall back to address test on From/To headers as a best-effort approximation.
+                // Note: this may produce false positives for forwarded mail, mailing lists, etc.
                 $result = $this->_test_address($test, $headers);
                 break;
 
@@ -156,25 +180,25 @@ class SieveRuleEvaluator
 
             case 'allof':
                 if (isset($test['tests'])) {
+                    $result = true;
                     foreach ($test['tests'] as $sub) {
                         if (!$this->_evaluate_test($sub, $headers, $size)) {
                             $result = false;
-                            break 2;
+                            break;
                         }
                     }
-                    $result = true;
                 }
                 break;
 
             case 'anyof':
                 if (isset($test['tests'])) {
+                    $result = false;
                     foreach ($test['tests'] as $sub) {
                         if ($this->_evaluate_test($sub, $headers, $size)) {
                             $result = true;
-                            break 2;
+                            break;
                         }
                     }
-                    $result = false;
                 }
                 break;
 
@@ -196,7 +220,10 @@ class SieveRuleEvaluator
     }
 
     /**
-     * Test a header value.
+     * Test a header value (RFC 5228 §5.7).
+     *
+     * Multi-value headers are tested individually per RFC 5228 §5.7.1:
+     * "If the header is multi-valued, each value is tested independently."
      *
      * @param array $test    Test with 'arg1' (header names), 'arg2' (values), 'type' (match type)
      * @param array $headers Normalized headers
@@ -214,11 +241,14 @@ class SieveRuleEvaluator
                 continue;
             }
 
-            $value = is_array($headers[$name]) ? implode(', ', $headers[$name]) : $headers[$name];
+            // RFC 5228 §5.7.1: test each value individually for multi-value headers
+            $values = is_array($headers[$name]) ? $headers[$name] : [$headers[$name]];
 
-            foreach ($keys as $pattern) {
-                if ($this->_match_value($value, $pattern, $match_type)) {
-                    return true;
+            foreach ($values as $value) {
+                foreach ($keys as $pattern) {
+                    if ($this->_match_value($value, $pattern, $match_type)) {
+                        return true;
+                    }
                 }
             }
         }
@@ -227,7 +257,7 @@ class SieveRuleEvaluator
     }
 
     /**
-     * Test an address header, extracting the specified part.
+     * Test an address header, extracting the specified part (RFC 5228 §5.1).
      *
      * @param array $test    Test with 'arg1' (header names), 'arg2' (values), 'type', 'part'
      * @param array $headers Normalized headers
@@ -246,32 +276,35 @@ class SieveRuleEvaluator
                 continue;
             }
 
-            $value = is_array($headers[$name]) ? implode(', ', $headers[$name]) : $headers[$name];
+            // Test each value individually for multi-value headers
+            $header_values = is_array($headers[$name]) ? $headers[$name] : [$headers[$name]];
 
-            // Extract individual addresses
-            $addresses = $this->_parse_addresses($value);
+            foreach ($header_values as $hval) {
+                // Extract individual addresses using Roundcube's parser if available
+                $addresses = $this->_parse_addresses($hval);
 
-            foreach ($addresses as $addr) {
-                $test_value = $addr;
+                foreach ($addresses as $addr) {
+                    $test_value = $addr;
 
-                switch ($part) {
-                    case 'localpart':
-                        $at = strrpos($addr, '@');
-                        $test_value = $at !== false ? substr($addr, 0, $at) : $addr;
-                        break;
-                    case 'domain':
-                        $at = strrpos($addr, '@');
-                        $test_value = $at !== false ? substr($addr, $at + 1) : '';
-                        break;
-                    case 'all':
-                    default:
-                        $test_value = $addr;
-                        break;
-                }
+                    switch ($part) {
+                        case 'localpart':
+                            $at = strrpos($addr, '@');
+                            $test_value = $at !== false ? substr($addr, 0, $at) : $addr;
+                            break;
+                        case 'domain':
+                            $at = strrpos($addr, '@');
+                            $test_value = $at !== false ? substr($addr, $at + 1) : '';
+                            break;
+                        case 'all':
+                        default:
+                            $test_value = $addr;
+                            break;
+                    }
 
-                foreach ($keys as $pattern) {
-                    if ($this->_match_value($test_value, $pattern, $match_type)) {
-                        return true;
+                    foreach ($keys as $pattern) {
+                        if ($this->_match_value($test_value, $pattern, $match_type)) {
+                            return true;
+                        }
                     }
                 }
             }
@@ -283,16 +316,34 @@ class SieveRuleEvaluator
     /**
      * Parse email addresses from a header value.
      *
+     * Uses rcube_mime::decode_address_list() when available (Roundcube context),
+     * falls back to a regex pattern.
+     *
      * @param string $value Header value (may contain multiple addresses)
-     * @return array List of email addresses
+     * @return array List of email addresses (lowercase)
      */
     private function _parse_addresses($value)
     {
-        $addresses = [];
+        // Use Roundcube's address parser when available (handles RFC 5321 fully)
+        if (class_exists('rcube_mime')) {
+            $parsed = rcube_mime::decode_address_list($value, null, true, null, false);
+            $addresses = [];
+            if (is_array($parsed)) {
+                foreach ($parsed as $entry) {
+                    if (!empty($entry['mailto'])) {
+                        $addresses[] = strtolower($entry['mailto']);
+                    }
+                }
+            }
+            if (!empty($addresses)) {
+                return $addresses;
+            }
+        }
 
-        // Match email addresses in angle brackets or bare addresses
-        if (preg_match_all('/[\w.+-]+@[\w.-]+\.\w+/', $value, $matches)) {
-            $addresses = $matches[0];
+        // Fallback regex - handles common formats including user@localhost
+        $addresses = [];
+        if (preg_match_all('/[\w.+-]+@[\w.-]+/', $value, $matches)) {
+            $addresses = array_map('strtolower', $matches[0]);
         }
 
         return $addresses;
@@ -347,7 +398,7 @@ class SieveRuleEvaluator
     }
 
     /**
-     * Test that specified headers exist.
+     * Test that specified headers exist (RFC 5228 §5.7.3).
      *
      * @param array $test    Test with 'arg' (header names)
      * @param array $headers Normalized headers
@@ -357,13 +408,18 @@ class SieveRuleEvaluator
     {
         $header_names = isset($test['arg']) ? (array) $test['arg'] : [];
 
+        // RFC: vacuous truth - empty list means all zero headers exist
+        if (empty($header_names)) {
+            return true;
+        }
+
         foreach ($header_names as $name) {
             if (!isset($headers[strtolower($name)])) {
                 return false;
             }
         }
 
-        return !empty($header_names);
+        return true;
     }
 
     /**
@@ -381,23 +437,66 @@ class SieveRuleEvaluator
                 return strcasecmp($value, $pattern) === 0;
 
             case 'contains':
+                if ($pattern === '') {
+                    return true; // empty string is contained in any string
+                }
                 return stripos($value, $pattern) !== false;
 
             case 'matches':
-                // Sieve 'matches' uses * and ? wildcards
-                // Convert to regex: * → .*, ? → .
-                $regex = '/^' . preg_quote($pattern, '/') . '$/i';
-                $regex = str_replace([preg_quote('*', '/'), preg_quote('?', '/')], ['.*', '.'], $regex);
-                return (bool) preg_match($regex, $value);
+                // Sieve 'matches' uses * (any string incl. empty) and ? (any single char)
+                // Sieve escape: \* matches literal *, \? matches literal ?
+                // Convert to PCRE regex with proper escape handling
+                $regex = $this->_sieve_match_to_regex($pattern);
+                return (bool) @preg_match($regex, $value);
 
             case 'regex':
-                // Pattern is already a regex
-                $delimited = '/' . str_replace('/', '\\/', $pattern) . '/i';
-                return (bool) @preg_match($delimited, $value);
+                // Pattern is already a regex - add safety limits against ReDoS
+                $delimited = '/(*LIMIT_MATCH=1000000)' . str_replace('/', '\\/', $pattern) . '/i';
+                $result = @preg_match($delimited, $value);
+                return $result === 1;
 
             default:
                 return false;
         }
+    }
+
+    /**
+     * Convert a Sieve 'matches' pattern to a PCRE regex.
+     *
+     * Handles Sieve escape sequences: \* → literal *, \? → literal ?
+     * Wildcards: * → any string (including empty), ? → any single character
+     *
+     * @param string $pattern Sieve matches pattern
+     * @return string PCRE regex with delimiters
+     */
+    private function _sieve_match_to_regex($pattern)
+    {
+        $regex = '';
+        $len = strlen($pattern);
+
+        for ($i = 0; $i < $len; $i++) {
+            $char = $pattern[$i];
+
+            if ($char === '\\' && $i + 1 < $len) {
+                $next = $pattern[$i + 1];
+                if ($next === '*' || $next === '?') {
+                    // Escaped wildcard → literal character
+                    $regex .= preg_quote($next, '/');
+                    $i++;
+                } else {
+                    // Literal backslash
+                    $regex .= preg_quote($char, '/');
+                }
+            } elseif ($char === '*') {
+                $regex .= '.*';
+            } elseif ($char === '?') {
+                $regex .= '.';
+            } else {
+                $regex .= preg_quote($char, '/');
+            }
+        }
+
+        return '/^' . $regex . '$/is'; // s flag: . matches newlines too
     }
 
     /**
@@ -406,7 +505,7 @@ class SieveRuleEvaluator
      * @param array $rule Rule definition with 'actions'
      * @return array List of actions [{type, target}, ...]
      */
-    public function _extract_actions(array $rule)
+    private function _extract_actions(array $rule)
     {
         $result = [];
 
@@ -428,10 +527,17 @@ class SieveRuleEvaluator
                     break;
 
                 case 'addflag':
-                case 'setflag':
                     $target = isset($action['target']) ? $action['target'] : null;
                     if ($target) {
                         $result[] = ['type' => 'addflag', 'target' => $target];
+                    }
+                    break;
+
+                case 'setflag':
+                    // setflag replaces all flags (RFC 5232), distinct from addflag
+                    $target = isset($action['target']) ? $action['target'] : null;
+                    if ($target) {
+                        $result[] = ['type' => 'setflag', 'target' => $target];
                     }
                     break;
 
@@ -451,7 +557,7 @@ class SieveRuleEvaluator
                     break;
 
                 case 'stop':
-                    // Stop is handled at the rule evaluation level
+                    // Stop is handled at the rule evaluation level via _has_stop()
                     break;
 
                 case 'redirect':
@@ -461,7 +567,6 @@ class SieveRuleEvaluator
                             $result[] = ['type' => 'redirect', 'target' => $target];
                         }
                     }
-                    // Silently skip redirect in retroactive mode
                     break;
 
                 case 'reject':
@@ -469,7 +574,6 @@ class SieveRuleEvaluator
                     if (!$this->skip_reject) {
                         $result[] = ['type' => 'reject', 'target' => null];
                     }
-                    // Silently skip reject in retroactive mode
                     break;
 
                 default:

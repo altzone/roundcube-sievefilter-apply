@@ -7,6 +7,7 @@
  */
 
 var sievefilter_apply_lock = null;
+var sievefilter_apply_selected_rules = null;
 
 if (window.rcmail) {
     rcmail.addEventListener('init', function () {
@@ -123,7 +124,7 @@ function sievefilter_apply_show_rules(data) {
             click: function () {
                 var selected = [];
                 $('input.sieve-rule-cb:checked').each(function () {
-                    selected.push(parseInt($(this).val()));
+                    selected.push(parseInt($(this).val(), 10));
                 });
 
                 if (selected.length === 0) {
@@ -199,14 +200,16 @@ function sievefilter_apply_single() {
     var filter_index = selected.replace(/^rcmrow/, '');
 
     var folders = rcmail.env.sievefilter_apply_folders || [];
+    var delimiter = rcmail.env.delimiter || '.';
 
     var html = '<div class="sievefilter-apply-folderpicker">';
     html += '<p>' + rcmail.gettext('sievefilter_apply.choose_folder') + '</p>';
     html += '<ul class="sievefilter-folder-list" id="sievefilter-apply-folder">';
     for (var i = 0; i < folders.length; i++) {
         var folder = folders[i];
-        var depth = (folder.match(/\./g) || []).length;
-        var name = folder.split('.').pop();
+        var delimRegex = new RegExp('\\' + delimiter, 'g');
+        var depth = (folder.match(delimRegex) || []).length;
+        var name = folder.split(delimiter).pop();
         var active = (folder === 'INBOX') ? ' active' : '';
         html += '<li class="folder-item' + active + '" data-folder="' + rcmail.quote_html(folder) + '"'
             + ' style="padding-left:' + (0.5 + depth * 1.2) + 'em">'
@@ -225,7 +228,7 @@ function sievefilter_apply_single() {
                     return;
                 }
                 $(this).dialog('close');
-                sievefilter_apply_preview(folder, [parseInt(filter_index)]);
+                sievefilter_apply_preview(folder, [parseInt(filter_index, 10)]);
             }
         },
         {
@@ -251,6 +254,9 @@ function sievefilter_apply_single() {
  * ========================================================= */
 
 function sievefilter_apply_preview(mbox, selected_rules) {
+    // Save selected rules for re-sending during execute
+    sievefilter_apply_selected_rules = selected_rules;
+
     sievefilter_apply_lock_ui('sievefilter_apply.analyzing');
 
     rcmail.http_post('plugin.sievefilter-apply-preview', {
@@ -270,10 +276,12 @@ function sievefilter_apply_show_preview(data) {
     html += '<p class="summary-header">';
     if (data.truncated) {
         html += rcmail.gettext('sievefilter_apply.preview_header_truncated')
-            .replace('%d', data.analyzed).replace('%t', data.total).replace('%s', data.mbox);
+            .replace('%d', data.analyzed).replace('%t', data.total)
+            .replace('%s', rcmail.quote_html(data.mbox));
     } else {
         html += rcmail.gettext('sievefilter_apply.preview_header')
-            .replace('%d', data.analyzed).replace('%s', data.mbox);
+            .replace('%d', data.analyzed)
+            .replace('%s', rcmail.quote_html(data.mbox));
     }
     html += '</p>';
 
@@ -333,7 +341,8 @@ function sievefilter_apply_execute(mbox, actions) {
 
     rcmail.http_post('plugin.sievefilter-apply-execute', {
         _mbox: mbox,
-        _actions: JSON.stringify(actions)
+        _actions: JSON.stringify(actions),
+        _rules: sievefilter_apply_selected_rules ? JSON.stringify(sievefilter_apply_selected_rules) : ''
     });
 }
 
@@ -377,7 +386,7 @@ function sievefilter_apply_show_result(data) {
 
     var buttons = [
         {
-            text: 'OK',
+            text: rcmail.gettext('sievefilter_apply.ok'),
             'class': 'mainaction',
             click: function () { $(this).dialog('close'); }
         }

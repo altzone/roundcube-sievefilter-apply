@@ -17,11 +17,17 @@ Sieve filters only apply to **new incoming messages**. This plugin bridges the g
 - **"Apply to folder" button** in the Sieve filter management toolbar
 - Apply a single selected filter to any folder via a folder picker dialog
 
-### Safety
+### Safety & Security
 - **Preview before execute** workflow prevents accidental bulk operations
+- **Server-side re-evaluation** on execute: the server re-evaluates all Sieve rules against message headers before applying actions, preventing any client-side tampering
+- **Mailbox validation**: the target folder is validated against the user's subscribed folder list before any operation
 - **Redirect actions are skipped** by default to prevent email storms
 - **Reject actions are skipped** by default (meaningless for received messages)
 - **Configurable message limit** to avoid runaway operations on large folders
+- **ReDoS protection**: regex patterns from Sieve rules are executed with backtracking limits
+- **No information leakage**: internal server errors are logged but never exposed to the browser
+- **XSS prevention**: all user-supplied content is escaped before DOM insertion
+- **CSRF protection**: all requests use Roundcube's built-in request token mechanism
 
 ## Requirements
 
@@ -86,9 +92,6 @@ $config['sievefilter_apply_skip_redirect'] = true;
 // Skip reject/ereject actions in retroactive mode (default: true)
 // Reject is meaningless for already-received messages
 $config['sievefilter_apply_skip_reject'] = true;
-
-// Restrict to specific hosts, null = all hosts allowed (default: null)
-$config['sievefilter_apply_allowed_hosts'] = null;
 ```
 
 ## Supported Sieve Features
@@ -97,13 +100,13 @@ $config['sievefilter_apply_allowed_hosts'] = null;
 
 | Test | Support | Notes |
 |------|---------|-------|
-| `header` | Full | All standard headers |
-| `address` | Full | Supports `:all`, `:localpart`, `:domain` parts |
-| `envelope` | Partial | Falls back to address test on From/To headers |
-| `size` | Full | `:over` and `:under` comparators |
-| `exists` | Full | |
-| `allof` | Full | Nested AND logic |
-| `anyof` | Full | Nested OR logic |
+| `header` | Full | All standard headers, multi-value tested individually per RFC 5228 |
+| `address` | Full | Supports `:all`, `:localpart`, `:domain` parts; uses RFC 5321-compliant address parser |
+| `envelope` | Partial | Falls back to address test on From/To headers (see Limitations) |
+| `size` | Full | `:over` and `:under` comparators with K/M/G suffixes |
+| `exists` | Full | Tests header presence (not emptiness) |
+| `allof` | Full | Nested AND logic with short-circuit evaluation |
+| `anyof` | Full | Nested OR logic with short-circuit evaluation |
 | `not` | Full | Negation |
 | `true` / `false` | Full | |
 | `body` | Not supported | Requires message body download |
@@ -115,8 +118,8 @@ $config['sievefilter_apply_allowed_hosts'] = null;
 |------|---------|-------|
 | `is` | Full | Exact case-insensitive match |
 | `contains` | Full | Substring search, case-insensitive |
-| `matches` | Full | Sieve wildcards (`*` and `?`) |
-| `regex` | Full | Regular expression matching |
+| `matches` | Full | Sieve wildcards (`*` and `?`) with proper escape handling (`\*`, `\?`) |
+| `regex` | Full | PCRE matching with ReDoS backtracking protection |
 
 ### Actions
 
@@ -124,12 +127,17 @@ $config['sievefilter_apply_allowed_hosts'] = null;
 |--------|---------|-------|
 | `fileinto` | Full | Creates target folder if it does not exist |
 | `discard` | Full | Deletes the message |
-| `addflag` / `setflag` | Full | Adds IMAP flag |
+| `addflag` | Full | Adds IMAP flag (RFC 5232) |
+| `setflag` | Full | Sets IMAP flag (RFC 5232, distinct from addflag) |
 | `removeflag` | Full | Removes IMAP flag |
 | `keep` | Full | No action (message stays) |
 | `stop` | Full | Stops rule evaluation |
 | `redirect` | Skipped | Disabled by default to prevent email storms |
 | `reject` / `ereject` | Skipped | Disabled by default (message already received) |
+
+### Rule Evaluation
+
+Per RFC 5228, **all matching rules fire** and their actions accumulate, unless an explicit `stop` command halts evaluation. This matches the behavior of standard Sieve implementations.
 
 ### Flag Mapping (Sieve to IMAP)
 
@@ -153,19 +161,29 @@ sievefilter_apply (companion plugin)
         |
         |--- Phase 1: Connect to Sieve, fetch & parse active script
         |--- Phase 2: Fetch IMAP headers in batches, evaluate rules
-        |--- Phase 3: Execute IMAP actions (move, delete, flag)
+        |--- Phase 3: Preview results to user for confirmation
+        |--- Phase 4: Re-evaluate rules server-side, execute IMAP actions
 ```
 
 The plugin uses the same connection parameters as `managesieve` (`managesieve_host`, `managesieve_port`, `managesieve_usetls`, `managesieve_conn_options`, etc.). No additional server configuration is required.
 
+### Security Model
+
+- **No client trust**: the execute phase re-evaluates Sieve rules server-side against each message's actual headers. The client-supplied action list is only used to identify which UIDs to process.
+- **Mailbox validation**: every mailbox parameter is validated against the user's subscribed folder list before any IMAP operation.
+- **Credentials**: uses Roundcube's session API (`get_user_name()`, `get_user_password()`) - no direct `$_SESSION` access.
+- **Input sanitization**: all user input goes through `rcube_utils::get_input_value()`.
+- **CSRF**: inherits Roundcube's request token protection via `rcmail.http_post()`.
+
 ## Known Limitations
 
-1. **Envelope tests** fall back to address tests on From/To headers since envelope data is not available retroactively.
+1. **Envelope tests** fall back to address tests on From/To headers since SMTP envelope data is not available retroactively. This may produce false positives for forwarded mail or mailing lists.
 2. **Body and date tests** are not supported as they require downloading full message content.
 3. **Maximum 500 messages** per operation by default. Increase `sievefilter_apply_max_messages` for larger folders, at the cost of longer processing time.
 4. **No background processing**. Analysis and execution happen synchronously; the UI is blocked during the operation.
 5. **No incremental processing**. If execution fails mid-batch, successfully processed messages are not rolled back.
 6. **MIME header decoding** is applied before rule evaluation. This matches the behavior of Dovecot's Sieve implementation but may differ from other implementations.
+7. **Headers are fetched individually** per message. Bulk IMAP FETCH is not used, which may be slow on very large folders over high-latency connections.
 
 ## Localization
 

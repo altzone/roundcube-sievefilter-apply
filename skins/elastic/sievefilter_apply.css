@@ -4,7 +4,6 @@
 .toolbar a.button.sievefilter-apply::before {
     content: "\f0b0"; /* FontAwesome filter icon */
     font-family: Icons !important;
-    font-weight: 900;
 }
 
 .toolbar a.button.sievefilter-apply:hover::before,
@@ -166,11 +165,11 @@ label.sieve-rule-item input[type="checkbox"] {
     white-space: nowrap;
 }
 
-/* ManageSieve toolbar: "Apply to folder" button (same style as create/delete) */
-#responsestoolbar a.button.sievefilter-apply::before {
+/* ManageSieve toolbar: "Apply to folder" button */
+#toolbar-menu a.button.sievefilter-apply::before,
+#layout-list .toolbar a.button.sievefilter-apply::before {
     content: "\f0b0";
     font-family: Icons !important;
-    font-weight: 900;
 }
 
 /* Folder picker */

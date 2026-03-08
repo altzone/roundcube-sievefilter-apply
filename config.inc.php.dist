@@ -13,7 +13,3 @@ $config['sievefilter_apply_skip_redirect'] = true;
 // Skip reject actions in retroactive mode (recommended: true)
 // Messages are already received, reject/bounce makes no sense retroactively
 $config['sievefilter_apply_skip_reject'] = true;
-
-// Restrict to specific hosts (null = all hosts allowed)
-// Example: ['mail.example.com', 'imap.example.com']
-$config['sievefilter_apply_allowed_hosts'] = null;
