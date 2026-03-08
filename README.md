@@ -17,6 +17,12 @@ Sieve filters only apply to **new incoming messages**. This plugin bridges the g
 - **"Apply to folder" button** in the Sieve filter management toolbar
 - Apply a single selected filter to any folder via a folder picker dialog
 
+### Apply Now After Save (v1.0.1)
+- **Automatic prompt** after saving a filter: "Apply it to existing messages?"
+- Works from both **Settings > Filters** and **Mail view** (right-click > Create filter)
+- Opens a **folder picker** to choose which folder to apply the filter to
+- Zero modification to the ManageSieve plugin — 100% client-side JS interception
+
 ### Safety & Security
 - **Preview before execute** workflow prevents accidental bulk operations
 - **Server-side re-evaluation** on execute: the server re-evaluates all Sieve rules against message headers before applying actions, preventing any client-side tampering
