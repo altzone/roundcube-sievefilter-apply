@@ -60,8 +60,8 @@ class sievefilter_apply extends rcube_plugin
             ], 'toolbar');
         }
 
-        // Inject folder list for the managesieve page
-        if ($is_sieve && $this->rc->output) {
+        // Inject folder list for the managesieve and mail pages
+        if (($is_sieve || $is_mail) && $this->rc->output && $this->rc->output->type === 'html') {
             $storage = $this->rc->get_storage();
             $folders = $storage->list_folders_subscribed('', '*', null, null, true);
             $this->rc->output->set_env('sievefilter_apply_folders', $folders);
@@ -199,6 +199,13 @@ class sievefilter_apply extends rcube_plugin
      */
     public function action_preview()
     {
+        if (!$this->rc->check_request()) {
+            $this->rc->output->command('plugin.sievefilter_apply_error',
+                ['message' => $this->gettext('error_invalid_actions')]);
+            $this->rc->output->send();
+            return;
+        }
+
         $mbox = rcube_utils::get_input_value('_mbox', rcube_utils::INPUT_POST);
 
         // Validate mailbox belongs to the current user
@@ -325,6 +332,13 @@ class sievefilter_apply extends rcube_plugin
      */
     public function action_execute()
     {
+        if (!$this->rc->check_request()) {
+            $this->rc->output->command('plugin.sievefilter_apply_error',
+                ['message' => $this->gettext('error_invalid_actions')]);
+            $this->rc->output->send();
+            return;
+        }
+
         $mbox = rcube_utils::get_input_value('_mbox', rcube_utils::INPUT_POST);
         $client_actions = rcube_utils::get_input_value('_actions', rcube_utils::INPUT_POST);
         $selected_rules_json = rcube_utils::get_input_value('_rules', rcube_utils::INPUT_POST);

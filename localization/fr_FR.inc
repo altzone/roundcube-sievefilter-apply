@@ -46,3 +46,6 @@ $labels['dialog_title_result'] = 'Résultat';
 $labels['apply_to_folder'] = 'Appliquer au dossier...';
 $labels['choose_folder'] = 'Choisissez le dossier sur lequel appliquer ce filtre :';
 $labels['error_sieve_connect'] = 'Impossible de se connecter au serveur Sieve';
+$labels['filter_saved_apply'] = 'Filtre « %s » sauvegardé. L\'appliquer aux messages existants ?';
+$labels['apply_now'] = 'Appliquer maintenant';
+$labels['no_thanks'] = 'Non merci';

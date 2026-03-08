@@ -8,6 +8,7 @@
 
 var sievefilter_apply_lock = null;
 var sievefilter_apply_selected_rules = null;
+var sievefilter_apply_pending_filter = null; // set when auto-applying after save
 
 if (window.rcmail) {
     rcmail.addEventListener('init', function () {
@@ -24,7 +25,58 @@ if (window.rcmail) {
         // Register response handlers
         rcmail.addEventListener('plugin.sievefilter_apply_rules_list', function (data) {
             sievefilter_apply_unlock();
-            sievefilter_apply_show_rules(data);
+            if (sievefilter_apply_pending_filter && data && data.rules && data.rules.length) {
+                var pending = sievefilter_apply_pending_filter;
+                sievefilter_apply_pending_filter = null;
+
+                var rule = null;
+                if (pending.name) {
+                    // Find by name
+                    for (var i = 0; i < data.rules.length; i++) {
+                        if (data.rules[i].name === pending.name) {
+                            rule = data.rules[i];
+                        }
+                    }
+                }
+                if (!rule && pending.use_last) {
+                    // Use the last rule (just created)
+                    rule = data.rules[data.rules.length - 1];
+                }
+
+                if (rule) {
+                    // Show prompt with filter name, then folder picker
+                    var msg = rcmail.gettext('sievefilter_apply.filter_saved_apply')
+                        .replace('%s', rcmail.quote_html(rule.name || ''));
+                    var filterIndex = rule.index;
+
+                    var buttons = [
+                        {
+                            text: rcmail.gettext('sievefilter_apply.apply_now'),
+                            'class': 'mainaction',
+                            click: function () {
+                                $(this).dialog('close');
+                                sievefilter_apply_folder_picker(filterIndex);
+                            }
+                        },
+                        {
+                            text: rcmail.gettext('sievefilter_apply.no_thanks'),
+                            'class': 'cancel',
+                            click: function () { $(this).dialog('close'); }
+                        }
+                    ];
+
+                    rcmail.show_popup_dialog(
+                        '<div class="sievefilter-apply-prompt"><p>' + msg + '</p></div>',
+                        rcmail.gettext('sievefilter_apply.dialog_title'),
+                        buttons,
+                        { width: 450, modal: true }
+                    );
+                } else {
+                    sievefilter_apply_show_rules(data);
+                }
+            } else {
+                sievefilter_apply_show_rules(data);
+            }
         });
 
         rcmail.addEventListener('plugin.sievefilter_apply_preview_result', function (data) {
@@ -46,6 +98,59 @@ if (window.rcmail) {
         if (rcmail.env.task === 'settings' && rcmail.env.action === 'plugin.managesieve') {
             sievefilter_apply_add_managesieve_button();
         }
+
+        // Wrap managesieve_updatelist to detect filter save (Settings > Filtres)
+        // Wrap managesieve_dialog_close to detect filter save (Mail view)
+        (function() {
+            function wrapUpdatelist() {
+                if (typeof rcmail.managesieve_updatelist === 'function'
+                        && !rcmail.managesieve_updatelist._sfa_wrapped) {
+                    var _orig = rcmail.managesieve_updatelist;
+                    rcmail.managesieve_updatelist = function(action, o) {
+                        _orig.call(rcmail, action, o);
+                        if ((action === 'add' || action === 'update') && o && o.id !== undefined) {
+                            sievefilter_apply_prompt_after_save(o.id, o.name);
+                        }
+                    };
+                    rcmail.managesieve_updatelist._sfa_wrapped = true;
+                    return true;
+                }
+                return false;
+            }
+
+            function wrapDialogClose() {
+                if (typeof rcmail.managesieve_dialog_close === 'function'
+                        && !rcmail.managesieve_dialog_close._sfa_wrapped) {
+                    var _orig_close = rcmail.managesieve_dialog_close;
+                    rcmail.managesieve_dialog_close = function() {
+                        _orig_close.call(rcmail);
+
+                        // In mail context, prompt to apply the saved filter
+                        if (rcmail.env.task === 'mail' && rcmail.env.mailbox) {
+                            sievefilter_apply_prompt_after_save_mail();
+                        }
+                    };
+                    rcmail.managesieve_dialog_close._sfa_wrapped = true;
+                    return true;
+                }
+                return false;
+            }
+
+            function doWrap() {
+                var a = wrapUpdatelist();
+                var b = wrapDialogClose();
+                return a || b;
+            }
+
+            if (!doWrap()) {
+                var attempts = 0;
+                var interval = setInterval(function() {
+                    if (doWrap() || ++attempts > 50) {
+                        clearInterval(interval);
+                    }
+                }, 200);
+            }
+        })();
     });
 }
 
@@ -187,6 +292,94 @@ function sievefilter_apply_add_managesieve_button() {
             $('#sievefilter-apply-single-btn').removeClass('disabled');
         });
     }
+}
+
+function sievefilter_apply_prompt_after_save(filter_id, filter_name) {
+    var msg = rcmail.gettext('sievefilter_apply.filter_saved_apply')
+        .replace('%s', rcmail.quote_html(filter_name || ''));
+
+    var buttons = [
+        {
+            text: rcmail.gettext('sievefilter_apply.apply_now'),
+            'class': 'mainaction',
+            click: function () {
+                $(this).dialog('close');
+                sievefilter_apply_folder_picker(filter_id);
+            }
+        },
+        {
+            text: rcmail.gettext('sievefilter_apply.no_thanks'),
+            'class': 'cancel',
+            click: function () { $(this).dialog('close'); }
+        }
+    ];
+
+    rcmail.show_popup_dialog(
+        '<div class="sievefilter-apply-prompt"><p>' + msg + '</p></div>',
+        rcmail.gettext('sievefilter_apply.dialog_title'),
+        buttons,
+        { width: 450, modal: true }
+    );
+}
+
+function sievefilter_apply_prompt_after_save_mail() {
+    // Fetch rules to find the last one (just created)
+    sievefilter_apply_pending_filter = { use_last: true };
+    sievefilter_apply_lock_ui('sievefilter_apply.loading_rules');
+    rcmail.http_post('plugin.sievefilter-apply-list-rules', {
+        _mbox: rcmail.env.mailbox
+    });
+}
+
+function sievefilter_apply_folder_picker(filter_id) {
+    var folders = rcmail.env.sievefilter_apply_folders || [];
+    var delimiter = rcmail.env.delimiter || '.';
+    var filter_index = String(filter_id).replace(/^rcmrow/, '');
+
+    var html = '<div class="sievefilter-apply-folderpicker">';
+    html += '<p>' + rcmail.gettext('sievefilter_apply.choose_folder') + '</p>';
+    html += '<ul class="sievefilter-folder-list" id="sievefilter-apply-folder">';
+    for (var i = 0; i < folders.length; i++) {
+        var folder = folders[i];
+        var delimRegex = new RegExp('\\' + delimiter, 'g');
+        var depth = (folder.match(delimRegex) || []).length;
+        var name = folder.split(delimiter).pop();
+        var active = (folder === 'INBOX') ? ' active' : '';
+        html += '<li class="folder-item' + active + '" data-folder="' + rcmail.quote_html(folder) + '"'
+            + ' style="padding-left:' + (0.5 + depth * 1.2) + 'em">'
+            + rcmail.quote_html(name) + '</li>';
+    }
+    html += '</ul></div>';
+
+    var buttons = [
+        {
+            text: rcmail.gettext('sievefilter_apply.analyze'),
+            'class': 'mainaction',
+            click: function () {
+                var folder = $('#sievefilter-apply-folder .folder-item.active').data('folder');
+                if (!folder) {
+                    rcmail.display_message(rcmail.gettext('sievefilter_apply.error_no_folder'), 'warning');
+                    return;
+                }
+                $(this).dialog('close');
+                sievefilter_apply_preview(folder, [parseInt(filter_index, 10)]);
+            }
+        },
+        {
+            text: rcmail.gettext('sievefilter_apply.cancel'),
+            'class': 'cancel',
+            click: function () { $(this).dialog('close'); }
+        }
+    ];
+
+    rcmail.show_popup_dialog(html, rcmail.gettext('sievefilter_apply.apply_to_folder'), buttons, {
+        width: 400, modal: true
+    });
+
+    $('#sievefilter-apply-folder').on('click', '.folder-item', function () {
+        $('#sievefilter-apply-folder .folder-item').removeClass('active');
+        $(this).addClass('active');
+    });
 }
 
 function sievefilter_apply_single() {
